@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -55,8 +56,36 @@
   .segmented button.active{background:var(--accent); color:#1a1206; font-weight:600;}
   .segmented button:disabled{opacity:.45; cursor:not-allowed;}
 
-  input[type=range]{width:220px; accent-color:var(--accent);}
+  input[type=range]{width:220px; accent-color:var(--accent);
+    /* 縦方向のタッチ移動はブラウザ標準のページスクロール(pan-y)に譲る。
+       横ドラッグのみスライダーの値を変える。iOS/Androidでレンジ入力が
+       縦スクロールを奪ってしまう問題への標準的な対処。 */
+    touch-action: pan-y;
+  }
   input[type=checkbox]{accent-color:var(--accent);}
+
+  /* ---- タッチ操作でのスライダー誤動作防止レイヤー ----
+     ネイティブのレンジ入力はタッチ開始(touchstart)の瞬間、移動データが
+     まだ無いうちに指の位置へ値をジャンプさせてしまい、touch-actionだけでは
+     防げない。coarse(タッチ)ポインタでは入力自体のタッチ処理を無効化し、
+     最初の約8pxの移動方向を見てから「縦スクロール」か「横方向のスライダー
+     操作」かを判定する透明レイヤーに置き換える。マウス/トラックパッド
+     (fine pointer)ではネイティブの挙動をそのまま使う。 */
+  .slider-wrap{
+    position:relative;
+  }
+  .slider-touch-layer{
+    position:absolute;
+    inset:0;
+    touch-action: pan-y;
+    z-index:2;
+  }
+  @media (pointer: fine){
+    .slider-touch-layer{ pointer-events:none; }
+  }
+  @media (pointer: coarse){
+    .slider-wrap input[type=range]{ pointer-events:none; }
+  }
 
   .btn{font-family:var(--body-font); font-weight:600; font-size:14px; padding:10px 18px; border-radius:4px; border:1px solid var(--accent); background:var(--accent); color:#1a1206; cursor:pointer; transition:filter .15s;}
   .btn:hover{filter:brightness(1.08);}
@@ -189,7 +218,10 @@
         </div>
         <div class="field" style="flex:1; min-width:220px;">
           <label for="tempo-slider">テンポ: <span id="tempo-value">92</span> BPM</label>
-          <input type="range" id="tempo-slider" min="40" max="208" value="92" step="1">
+          <div class="slider-wrap">
+            <input type="range" id="tempo-slider" min="40" max="208" value="92" step="1">
+            <div class="slider-touch-layer" aria-hidden="true"></div>
+          </div>
         </div>
       </div>
       <div class="row" style="margin-bottom:0;">
@@ -718,6 +750,85 @@
     reader.readAsText(file);
     e.target.value = '';
   });
+
+  // ---------- タッチ操作でのスライダー誤動作防止 ----------
+  // レンジ入力はタッチ開始(touchstart)の瞬間、指の位置にジャンプしてしまうため
+  // touch-actionだけでは防げない。coarse(タッチ)ポインタでは入力自体のタッチ処理を無効化し、
+  // 最初の約8pxの移動方向を見てから「スライダー操作」か「縦スクロール」かを判定する透明レイヤーに置き換える。
+  // マウス/トラックパッド(fine pointer)ではネイティブの挙動をそのまま使う。
+  function setupTouchSlider(wrap){
+    var input = wrap.querySelector('input[type=range]');
+    var layer = wrap.querySelector('.slider-touch-layer');
+    if(!input || !layer) return;
+
+    var SLOP = 8; // 方向を確定させるまでの移動量(px)
+    var pointerId = null;
+    var startX = 0, startY = 0;
+    var decided = null; // null | 'drag' | 'scroll'
+    var rect = null;
+
+    function valueFromClientX(x){
+      var min = parseFloat(input.min), max = parseFloat(input.max);
+      var step = parseFloat(input.step) || 1;
+      var frac = (x - rect.left) / rect.width;
+      frac = Math.min(1, Math.max(0, frac));
+      var raw = min + frac * (max - min);
+      raw = Math.round(raw / step) * step;
+      return Math.min(max, Math.max(min, raw));
+    }
+
+    function applyValue(x){
+      var v = valueFromClientX(x);
+      if(String(v) !== input.value){
+        input.value = v;
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+      }
+    }
+
+    layer.addEventListener('pointerdown', function(e){
+      if(e.pointerType === 'mouse') return; // マウスはネイティブ挙動に任せる(このレイヤーはfineポインタ時pointer-events:none)
+      pointerId = e.pointerId;
+      startX = e.clientX;
+      startY = e.clientY;
+      decided = null;
+      rect = input.getBoundingClientRect();
+      // ここではpreventDefaultも値変更も行わない。方向未確定・静止したタッチで
+      // スライダーが動いてしまうことを防ぐため。
+    }, {passive:true});
+
+    layer.addEventListener('pointermove', function(e){
+      if(e.pointerId !== pointerId) return;
+      var dx = e.clientX - startX;
+      var dy = e.clientY - startY;
+
+      if(decided === null){
+        if(Math.abs(dx) > SLOP || Math.abs(dy) > SLOP){
+          if(Math.abs(dx) > Math.abs(dy)){
+            decided = 'drag';
+            try{ layer.setPointerCapture(pointerId); }catch(err){}
+          } else {
+            decided = 'scroll'; // ブラウザ標準の縦スクロール(pan-y)に任せる
+          }
+        }
+      }
+
+      if(decided === 'drag'){
+        e.preventDefault();
+        applyValue(e.clientX);
+      }
+      // decided === 'scroll' の場合は何もしない。レイヤーのtouch-action:pan-yにより
+      // ここからページのスクロールがネイティブに機能する。
+    }, {passive:false});
+
+    function endGesture(e){
+      if(e.pointerId !== pointerId) return;
+      pointerId = null;
+      decided = null;
+    }
+    layer.addEventListener('pointerup', endGesture);
+    layer.addEventListener('pointercancel', endGesture);
+  }
+  document.querySelectorAll('.slider-wrap').forEach(setupTouchSlider);
 
   // ---------- フレーズビルダー（本フレーズ／前奏で共用する汎用ロジック） ----------
   function createBuilder(opts){
