@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -164,8 +165,8 @@
           </select>
         </div>
         <div class="field">
-          <label for="task-count">課題数</label>
-          <input type="number" id="task-count" min="1" max="100" value="20">
+          <label for="task-count">課題数（0で無限）</label>
+          <input type="number" id="task-count" min="0" max="100" value="20">
         </div>
       </div>
       <div class="row">
@@ -362,7 +363,7 @@
   });
   taskCountInput.addEventListener('change', function(){
     var v = parseInt(taskCountInput.value, 10);
-    if(isNaN(v) || v < 1) v = 1;
+    if(isNaN(v) || v < 0) v = 0; // 0 = 無限モード
     if(v > 100) v = 100;
     taskCountInput.value = v;
     taskCount = v;
