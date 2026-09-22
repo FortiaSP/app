@@ -579,7 +579,7 @@
   }
 
   // ---------- 録音ステップUI ----------
-  function setRecordStageUI(stage, noteLabel){
+  function setRecordStageUI(stage, noteLabel, cents){
     var icon = document.getElementById('record-stage-icon');
     var label = document.getElementById('record-stage-label');
     var sub = document.getElementById('record-stage-sub');
@@ -594,7 +594,14 @@
     } else if(stage === 'retry'){
       icon.innerHTML = '<span style="color:var(--bad);">×</span>';
       label.textContent = '音程がずれました。録り直します（' + noteLabel + '）';
-      sub.textContent = '\u00a0';
+      if(cents !== null && cents !== undefined){
+        var centsRounded = Math.round(cents);
+        var centsClass = Math.abs(centsRounded) <= 30 ? 'warn' : 'bad';
+        var centsText = (centsRounded>0?'+':'') + centsRounded + '¢';
+        sub.innerHTML = '誤差 <span class="cents ' + centsClass + '">' + centsText + '</span>（±15¢以内で合格）';
+      } else {
+        sub.textContent = '声を検出できませんでした（無音または検出不可）';
+      }
     } else if(stage === 'done'){
       icon.innerHTML = '<span style="color:var(--good);">◎</span>';
       label.textContent = 'すべて録音しました';
@@ -652,12 +659,14 @@
           .map(function(s){ return s.f; }).sort(function(a,b){ return a-b; });
 
         var passed = false;
+        var centsForDisplay = null;
         if(validSamples.length > 0){
           var med = validSamples[Math.floor(validSamples.length/2)];
           var expected = midiToFreq(targetMidi);
           var rawCents = 1200 * log2(med/expected);
           var octShift = Math.round(rawCents/1200);
           var cents = rawCents - 1200*octShift;
+          centsForDisplay = cents;
           if(Math.abs(cents) <= 15) passed = true;
         }
 
@@ -676,8 +685,8 @@
           recordedVoices[targetMidi] = buf;
           accepted = true;
         } else {
-          setRecordStageUI('retry', noteLabel);
-          await wait(0.6);
+          setRecordStageUI('retry', noteLabel, centsForDisplay);
+          await wait(1.1);
         }
       }
 
