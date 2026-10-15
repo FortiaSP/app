@@ -23,6 +23,7 @@
   --accent:#8592ff; --accent-fg:#10122a; --silence:#0a0b14; --silence-fg:#c9ccff;
   --ok:#4cc38a; --warn:#e3a15a; --bad:#ec6f7f; color-scheme:dark}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 var(--font);
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:16px 40px;
   -webkit-text-size-adjust:100%}
@@ -31,18 +32,22 @@ h1{font-size:20px;margin:0;letter-spacing:.02em}
 h2{font-size:13px;margin:0 0 10px;color:var(--muted);letter-spacing:.08em;font-weight:600}
 .sub{color:var(--muted);font-size:13px;margin:2px 0 0}
 .warnbox{background:color-mix(in srgb,var(--warn) 14%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);border-radius:8px;padding:10px 12px;font-size:13px}
-.stage{position:relative;width:100%;aspect-ratio:16/9;max-width:100%;background:#000;border-radius:10px;overflow:hidden}
-.stage iframe,#player{position:absolute;inset:0;width:100%;height:100%;border:0}
-.empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#aab;font-size:14px;text-align:center;padding:16px}
-.veil{position:absolute;inset:0;background:var(--silence);color:var(--silence-fg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;font-size:15px;letter-spacing:.05em}
-.dot{width:14px;height:14px;border-radius:50%;background:var(--silence-fg);animation:pulse 1.6s ease-in-out infinite}
+.stage{position:fixed;left:0;bottom:0;width:2px;height:2px;overflow:hidden;opacity:0;pointer-events:none}
+.stage iframe,#player{width:320px;height:180px;border:0}
+.stage.show{position:relative;width:100%;height:auto;aspect-ratio:16/9;max-width:100%;opacity:1;pointer-events:auto;border-radius:10px;background:#000}
+.stage.show iframe,.stage.show #player{position:absolute;inset:0;width:100%;height:100%}
+.now{font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--silence-fg);animation:pulse 1.6s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:.25;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
 @media (prefers-reduced-motion:reduce){.dot{animation:none}}
-.status{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
-.phase{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px}
+.status{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px 16px;transition:background .3s,color .3s}
+.status.silent{background:var(--silence);color:var(--silence-fg);border-color:var(--silence)}
+.status.silent .chip{display:none}
+.status-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.phase{display:flex;align-items:center;gap:10px;font-weight:700;font-size:20px}
 .chip{display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--muted)}
 .phase[data-p="audible"] .chip{background:var(--ok)}
-.phase[data-p="muted"] .chip{background:var(--silence);outline:2px solid var(--accent)}
+@media (prefers-reduced-motion:reduce){.status{transition:none}}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 button{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:8px;padding:9px 14px;cursor:pointer;touch-action:manipulation}
 button:hover{border-color:var(--accent)}
@@ -89,14 +94,13 @@ th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--sur
 
   <div id="fileWarn" class="warnbox" hidden>このファイルをPCから直接開いています。YouTubeは直接開いたファイル内での再生を拒否することがあります（エラー153など）。GitHub Pages に置くか、フォルダで <span class="mono">python3 -m http.server</span> を実行して <span class="mono">http://localhost:8000/</span> から開いてください。</div>
 
-  <div class="stage" id="stage">
-    <div class="empty" id="empty">下の「動画リスト」にYouTubeのURLを追加してください</div>
-    <div id="player"></div>
-    <div class="veil" id="veil" hidden><div class="dot"></div><div>頭の中で続けて</div></div>
-  </div>
+  <div class="stage" id="stage"><div id="player"></div></div>
 
-  <div class="status">
-    <div class="phase" id="phase" data-p="idle"><span class="chip"></span><span id="phaseText">待機中</span></div>
+  <div class="status" id="status">
+    <div class="status-main">
+      <div class="phase" id="phase" data-p="idle"><span class="chip"></span><span class="dot" id="dot" hidden></span><span id="phaseText">待機中</span></div>
+      <div class="now" id="nowTitle">下の「動画リスト」にYouTubeのURLを追加してください</div>
+    </div>
     <div class="row">
       <button id="btnPause" disabled>一時停止</button>
       <button id="btnTrain" class="primary" disabled>トレーニング開始</button>
@@ -124,6 +128,7 @@ th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--sur
       <button id="btnNext" disabled>次の曲</button>
       <button id="btnRand" disabled>ランダムな曲</button>
     </div>
+    <label class="check"><input type="checkbox" id="showPlayer"> YouTubeのプレーヤーを表示する（広告のスキップや、再生が始まらないときの操作用）</label>
   </section>
 
   <section class="panel">
@@ -144,7 +149,6 @@ th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--sur
         <div class="small">0 にすると今までどおり瞬時に切り替わります。iPhone・iPad では音量をページから変えられないため、フェードせず瞬時に切り替わります。</div>
       </div>
     </div>
-    <label class="check"><input type="checkbox" id="hideVideo"> 無音の間は映像も隠す（演奏者の動きや再生時間で答えが分からないように）</label>
     <label class="check"><input type="checkbox" id="adaptive"> 適応モード：「一致」で無音を長く、ずれたら短くする</label>
     <label class="check"><input type="checkbox" id="autoNext"> 曲が終わったら次の曲へ進み、続けてトレーニングする</label>
   </section>
@@ -179,7 +183,7 @@ var JLABEL={early:'脳内が先行',match:'一致',late:'脳内が遅れ',lost:'
 if(location.protocol==='file:') $('fileWarn').hidden=false;
 
 /* ---------- settings ---------- */
-var DEF={audMin:6,audMax:15,muteMin:3,muteMax:8,fadeOut:0.8,fadeIn:0.3,hideVideo:true,adaptive:false,autoNext:true,k:1};
+var DEF={audMin:6,audMax:15,muteMin:3,muteMax:8,fadeOut:0.8,fadeIn:0.3,adaptive:false,autoNext:true,k:1};
 var cfg=Object.assign({},DEF,store.get('imt.cfg',{}));
 ['audMin','audMax','muteMin','muteMax','fadeOut','fadeIn'].forEach(function(id){
   $(id).value=cfg[id];
@@ -195,12 +199,12 @@ var cfg=Object.assign({},DEF,store.get('imt.cfg',{}));
     saveCfg(); renderEff();
   });
 });
-['hideVideo','adaptive','autoNext'].forEach(function(id){
+$('showPlayer').addEventListener('change',function(){$('stage').classList.toggle('show',$('showPlayer').checked)});
+['adaptive','autoNext'].forEach(function(id){
   $(id).checked=!!cfg[id];
   $(id).addEventListener('change',function(){
     cfg[id]=$(id).checked;
     if(id==='adaptive'&&!cfg.adaptive) cfg.k=1;
-    if(id==='hideVideo'&&inGap()) $('veil').hidden=!cfg.hideVideo;
     saveCfg(); renderEff();
   });
 });
@@ -272,7 +276,7 @@ function loadVideo(i,autoTrain){
   if(!list[i]) return;
   if(!apiReady){pendingLoad={i:i,auto:autoTrain};return}
   if(S.training) stopTraining(true);
-  cur=i; renderList(); $('empty').hidden=true;
+  cur=i; renderList(); renderNow();
   var id=list[i].id;
   if(!player){
     var pv={playsinline:1,rel:0};
@@ -290,7 +294,7 @@ function enableControls(){$('btnTrain').disabled=false;$('btnPause').disabled=fa
 function onState(e){
   var st=e.data;
   if(st===YT.PlayerState.PLAYING&&cur>=0&&!list[cur].title){
-    try{var d=player.getVideoData(); if(d&&d.title){list[cur].title=d.title;store.set('imt.list',list);renderList()}}catch(_){}
+    try{var d=player.getVideoData(); if(d&&d.title){list[cur].title=d.title;store.set('imt.list',list);renderList();renderNow()}}catch(_){}
   }
   $('btnPause').textContent=(st===YT.PlayerState.PLAYING||st===YT.PlayerState.BUFFERING)?'一時停止':'再生';
   if(st===YT.PlayerState.ENDED&&S.training){
@@ -314,7 +318,11 @@ var S={training:false,phase:'idle',next:null,lastT:null,lastWall:0,muteStart:0,f
 var trials=store.get('imt.trials',[]);
 var timer=null;
 
-function setPhase(p,text){$('phase').dataset.p=p;$('phaseText').textContent=text}
+function setPhase(p,text){
+  $('phase').dataset.p=p;$('phaseText').textContent=text;
+  var silent=p==='muted'; $('status').classList.toggle('silent',silent); $('dot').hidden=!silent;
+}
+function renderNow(){$('nowTitle').textContent=cur>=0?('♪ '+(list[cur].title||list[cur].id)):'下の「動画リスト」にYouTubeのURLを追加してください'}
 function setPhaseText(t){$('phaseText').textContent=t}
 
 function startTraining(){
@@ -329,7 +337,6 @@ function stopTraining(silent){
   if(inGap()) endMute(false);
   S.training=false; S.phase='idle';
   if(player&&ready) player.unMute();
-  $('veil').hidden=true;
   $('btnTrain').textContent='トレーニング開始';
   if(!silent) setPhase('idle','停止中');
   if(timer){clearInterval(timer);timer=null}
@@ -386,7 +393,6 @@ function beginMute(t,m){
   S.phase='fadeout'; S.muteStart=t; S.fadeStart=t;
   S.next=t+cfg.fadeOut+m;                    // the fully silent part lasts m seconds
   if(cfg.fadeOut<=0){ player.mute(); S.phase='muted'; }
-  if(cfg.hideVideo) $('veil').hidden=false;
   setPhase('muted','無音 — 頭の中で続けて');
   $('judge').classList.remove('on'); $('judgeHint').classList.remove('on');
   $('judgeHint').textContent='音が戻ったら判定します。';
@@ -394,7 +400,6 @@ function beginMute(t,m){
 function beginFadeIn(t){
   if(cfg.fadeIn>0){ setGain(0); player.unMute(); S.phase='fadein'; S.fadeStart=t; }
   else { setGain(1); player.unMute(); S.phase='audible'; S.next=t+rnd(cfg.audMin,cfg.audMax); }
-  $('veil').hidden=true;
   // gap length = from the start of the fade-out to the start of the fade-in
   S.pending={at:S.muteStart,len:t-S.muteStart,vid:cur>=0?list[cur].id:'',title:cur>=0?(list[cur].title||list[cur].id):''};
   $('judge').classList.add('on'); $('judgeHint').classList.add('on');
@@ -403,7 +408,6 @@ function beginFadeIn(t){
 }
 function endMute(){                          // abort a gap (seek, stop, song end): restore sound at once
   setGain(1); player.unMute();
-  $('veil').hidden=true;
   S.phase=S.training?'audible':'idle';
   if(S.training) setPhase('audible','再生中');
 }
