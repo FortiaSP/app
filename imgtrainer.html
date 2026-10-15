@@ -102,7 +102,6 @@ th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--sur
       <div class="now" id="nowTitle">下の「動画リスト」にYouTubeのURLを追加してください</div>
     </div>
     <div class="row">
-      <button id="btnPause" disabled>一時停止</button>
       <button id="btnTrain" class="primary" disabled>トレーニング開始</button>
     </div>
   </div>
@@ -151,7 +150,7 @@ th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--sur
       <div>
         <label>無音の間の音量</label>
         <label class="check"><input type="radio" name="floorMode" id="floorOff" value="off"> 完全に消す</label>
-        <label class="check"><input type="radio" name="floorMode" id="floorOn" value="on"> ごく小さく鳴らし続ける <input type="number" id="floorLv" min="1" max="30" step="1" aria-label="残す音量（%）"> %</label>
+        <label class="check"><input type="radio" name="floorMode" id="floorOn" value="on"> 微弱音 <input type="number" id="floorLv" min="1" max="30" step="1" aria-label="残す音量（%）"> %</label>
         <div class="small" id="floorNote">完全な無音で続けるのが難しいときの補助です。聞こえるか聞こえないかの大きさに調整してください。</div>
       </div>
       <div>
@@ -193,7 +192,7 @@ var JLABEL={early:'脳内が先行',match:'一致',late:'脳内が遅れ',lost:'
 if(location.protocol==='file:') $('fileWarn').hidden=false;
 
 /* ---------- settings ---------- */
-var DEF={v:3,audMin:6,audMax:15,muteMin:2,muteMax:4,fadeOut:0.8,fadeIn:0.3,intro:30,showPlayer:true,floorOn:false,floorLv:4,adaptive:false,autoNext:true,k:1};
+var DEF={v:3,audMin:6,audMax:15,muteMin:2,muteMax:4,fadeOut:0.8,fadeIn:0.3,intro:30,showPlayer:true,floorOn:false,floorLv:4,fadeOutQ:0.7,fadeInQ:0.7,adaptive:false,autoNext:true,k:1};
 var saved=store.get('imt.cfg',{});
 var oldV=saved.v||1;
 if(oldV<3){delete saved.muteMin;delete saved.muteMax;delete saved.k;saved.v=3}
@@ -202,7 +201,7 @@ var cfg=Object.assign({},DEF,saved);
   $(id).value=cfg[id];
   $(id).addEventListener('change',function(){
     var v=parseFloat($(id).value), isFade=/^fade/.test(id);
-    if(isFade){ if(!(v>=0)) v=DEF[id]; v=Math.min(5,v); }
+    if(isFade){ if(!(v>=0)) v=DEF[fadeKey(id)]; v=Math.min(5,v); $(id).value=v; cfg[fadeKey(id)]=v; saveCfg(); return; }
     else if(id==='intro'){ if(!(v>=0)) v=DEF[id]; }
     else if(!(v>0)) v=DEF[id];
     $(id).value=v;
@@ -217,7 +216,12 @@ var IOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='Mac
 $('floorOn').checked=cfg.floorOn; $('floorOff').checked=!cfg.floorOn; $('floorLv').value=cfg.floorLv;
 if(IOS){ $('floorOn').disabled=true; $('floorLv').disabled=true; $('floorOff').checked=true; cfg.floorOn=false;
   $('floorNote').textContent='iPhone・iPad ではページから音量を変えられないため、このモードは使えません（PC・Androidで使えます）。'; }
-['floorOn','floorOff'].forEach(function(id){$(id).addEventListener('change',function(){cfg.floorOn=$('floorOn').checked;saveCfg();renderLog()})});
+['floorOn','floorOff'].forEach(function(id){$(id).addEventListener('change',function(){cfg.floorOn=$('floorOn').checked;saveCfg();showFades();renderLog()})});
+function fadeKey(id){return floorNow()>0?id+'Q':id}           // faint-sound mode keeps its own fade times
+function fo(){return cfg[fadeKey('fadeOut')]}
+function fi(){return cfg[fadeKey('fadeIn')]}
+function showFades(){$('fadeOut').value=fo();$('fadeIn').value=fi()}
+showFades();
 $('floorLv').addEventListener('change',function(){
   var v=Math.round(parseFloat($('floorLv').value)); if(!(v>=1)) v=DEF.floorLv; v=Math.min(30,v);
   $('floorLv').value=v; cfg.floorLv=v; saveCfg();
@@ -321,13 +325,12 @@ function loadVideo(i,autoTrain){
   }
   setPhaseText('待機中');
 }
-function enableControls(){$('btnTrain').disabled=false;$('btnPause').disabled=false}
+function enableControls(){$('btnTrain').disabled=false}
 function onState(e){
   var st=e.data;
   if(st===YT.PlayerState.PLAYING&&cur>=0&&!list[cur].title){
     try{var d=player.getVideoData(); if(d&&d.title){list[cur].title=d.title;store.set('imt.list',list);renderList();renderNow()}}catch(_){}
   }
-  $('btnPause').textContent=(st===YT.PlayerState.PLAYING||st===YT.PlayerState.BUFFERING)?'一時停止':'再生';
   if(st===YT.PlayerState.ENDED&&S.training){
     if(inGap()) endMute(false);
     if(cfg.autoNext&&list.length>1){ loadVideo((cur+1)%list.length,true) }
@@ -378,7 +381,6 @@ function togglePause(){
   var st=player.getPlayerState();
   if(st===YT.PlayerState.PLAYING||st===YT.PlayerState.BUFFERING) player.pauseVideo(); else player.playVideo();
 }
-$('btnPause').addEventListener('click',togglePause);
 
 /* Phases: audible → fadeout → muted → fadein → audible.
    Fades are driven by video time in tick(), so they stay in step with buffering and playback rate. */
@@ -408,16 +410,16 @@ function tick(){
   if(S.phase==='audible'){
     if(t>=S.next){
       var m=rnd(cfg.muteMin,cfg.muteMax)*kNow();
-      if(dur-t>m+cfg.fadeOut+cfg.fadeIn+1.5) beginMute(t,m); else S.next=Infinity;
+      if(dur-t>m+fo()+fi()+1.5) beginMute(t,m); else S.next=Infinity;
     }
   }else if(S.phase==='fadeout'){
-    var x=cfg.fadeOut>0?(t-S.fadeStart)/cfg.fadeOut:1;
+    var x=fo()>0?(t-S.fadeStart)/fo():1;
     if(x>=1){ if(S.floor>0) setGain(S.floor); else player.mute(); S.phase='muted'; }
     else setGain(1-(1-S.floor)*ease(x));
   }else if(S.phase==='muted'){
     if(t>=S.next) beginFadeIn(t);
   }else if(S.phase==='fadein'){
-    var y=cfg.fadeIn>0?(t-S.fadeStart)/cfg.fadeIn:1;
+    var y=fi()>0?(t-S.fadeStart)/fi():1;
     if(y>=1){ setGain(1); S.phase='audible'; S.next=planNext(t); }
     else setGain(S.floor+(1-S.floor)*ease(y));
   }
@@ -427,14 +429,14 @@ function beginMute(t,m){
   try{var v=player.getVolume(); if(v>0) S.baseVol=v;}catch(e){}
   S.floor=floorNow();                        // 0 = full mute, otherwise the quiet level kept during the gap
   S.phase='fadeout'; S.muteStart=t; S.fadeStart=t;
-  S.next=t+cfg.fadeOut+m;                    // the quiet part lasts m seconds
-  if(cfg.fadeOut<=0){ if(S.floor>0) setGain(S.floor); else player.mute(); S.phase='muted'; }
-  setPhase('muted',S.floor>0?'小音量 — 頭の中で続けて':'無音 — 頭の中で続けて');
+  S.next=t+fo()+m;                    // the quiet part lasts m seconds
+  if(fo()<=0){ if(S.floor>0) setGain(S.floor); else player.mute(); S.phase='muted'; }
+  setPhase('muted',S.floor>0?'微弱音 — 頭の中で続けて':'無音 — 頭の中で続けて');
   $('judge').classList.remove('on'); $('judgeHint').classList.remove('on');
   $('judgeHint').textContent='音が戻ったら判定します。';
 }
 function beginFadeIn(t){
-  if(cfg.fadeIn>0){ setGain(S.floor); player.unMute(); S.phase='fadein'; S.fadeStart=t; }
+  if(fi()>0){ setGain(S.floor); player.unMute(); S.phase='fadein'; S.fadeStart=t; }
   else { setGain(1); player.unMute(); S.phase='audible'; S.next=planNext(t); }
   // gap length = from the start of the fade-out to the start of the fade-in
   S.pending={at:S.muteStart,len:t-S.muteStart,lv:Math.round(S.floor*100),vid:cur>=0?list[cur].id:'',title:cur>=0?(list[cur].title||list[cur].id):''};
@@ -495,7 +497,7 @@ function renderLog(){
   var early=ans.filter(function(r){return r.j==='early'}).length, late=ans.filter(function(r){return r.j==='late'}).length;
   var mm=median(match.map(function(r){return r.len}));
   $('stats').innerHTML='';
-  var mode=document.createElement('div');var mb=document.createElement('b');mb.textContent=quiet?'小音量':'完全消音';mode.appendChild(mb);mode.appendChild(document.createTextNode('の集計'));$('stats').appendChild(mode);
+  var mode=document.createElement('div');var mb=document.createElement('b');mb.textContent=quiet?'微弱音':'完全消音';mode.appendChild(mb);mode.appendChild(document.createTextNode('の集計'));$('stats').appendChild(mode);
   [['回答数',String(ans.length)],
    ['一致率（全体）',ans.length?Math.round(match.length/ans.length*100)+'%':'—'],
    ['一致率（直近20）',recent.length?Math.round(rm/recent.length*100)+'%':'—'],
