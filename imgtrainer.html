@@ -187,9 +187,10 @@ var JLABEL={early:'脳内が先行',match:'一致',late:'脳内が遅れ',lost:'
 if(location.protocol==='file:') $('fileWarn').hidden=false;
 
 /* ---------- settings ---------- */
-var DEF={v:2,audMin:6,audMax:15,muteMin:1,muteMax:2,fadeOut:0.8,fadeIn:0.3,intro:30,showPlayer:true,adaptive:false,autoNext:true,k:1};
+var DEF={v:3,audMin:6,audMax:15,muteMin:2,muteMax:4,fadeOut:0.8,fadeIn:0.3,intro:30,showPlayer:true,adaptive:false,autoNext:true,k:1};
 var saved=store.get('imt.cfg',{});
-if((saved.v||1)<2){delete saved.muteMin;delete saved.muteMax;delete saved.k;saved.v=2}
+var oldV=saved.v||1;
+if(oldV<3){delete saved.muteMin;delete saved.muteMax;delete saved.k;saved.v=3}
 var cfg=Object.assign({},DEF,saved);
 ['audMin','audMax','muteMin','muteMax','fadeOut','fadeIn','intro'].forEach(function(id){
   $(id).value=cfg[id];
@@ -225,7 +226,12 @@ function renderEff(){
 function rnd(a,b){return a+Math.random()*(b-a)}
 
 /* ---------- video list ---------- */
+var DEFAULT_VIDEO='HaA3YZ6QdJU';
 var list=store.get('imt.list',[]);
+if(oldV<3&&!list.some(function(x){return x.id===DEFAULT_VIDEO})){   // add the default song once
+  list.unshift({id:DEFAULT_VIDEO,title:''});
+}
+store.set('imt.list',list); store.set('imt.cfg',cfg);
 var cur=-1;
 function parseId(s){
   s=s.trim(); if(!s) return null;
