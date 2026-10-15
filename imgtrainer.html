@@ -10,18 +10,18 @@
   --bg:#f3f4f7; --surface:#ffffff; --fg:#1d2030; --muted:#6a6f86; --line:#dcdfe8;
   --accent:#3b4bb8; --accent-fg:#ffffff;
   --silence:#22264a; --silence-fg:#e8e9ff;
-  --ok:#1f8a5b; --warn:#b5651d; --bad:#b03a48;
+  --ok:#1f8a5b; --warn:#b5651d; --bad:#b03a48; --rec:#d22b2b; --rec-fg:#ffffff;
   --font:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic UI","Meiryo",sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#12131a; --surface:#1b1d27; --fg:#e6e7ef; --muted:#9296ad; --line:#2d3040;
   --accent:#8592ff; --accent-fg:#10122a; --silence:#0a0b14; --silence-fg:#c9ccff;
-  --ok:#4cc38a; --warn:#e3a15a; --bad:#ec6f7f; color-scheme:dark}}
+  --ok:#4cc38a; --warn:#e3a15a; --bad:#ec6f7f; --rec:#e5484d; --rec-fg:#ffffff; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#12131a; --surface:#1b1d27; --fg:#e6e7ef; --muted:#9296ad; --line:#2d3040;
   --accent:#8592ff; --accent-fg:#10122a; --silence:#0a0b14; --silence-fg:#c9ccff;
-  --ok:#4cc38a; --warn:#e3a15a; --bad:#ec6f7f; color-scheme:dark}
+  --ok:#4cc38a; --warn:#e3a15a; --bad:#ec6f7f; --rec:#e5484d; --rec-fg:#ffffff; color-scheme:dark}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 var(--font);
@@ -54,6 +54,9 @@ button:hover{border-color:var(--accent)}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:700}
 button:disabled{opacity:.45;cursor:default}
+button.rec{background:var(--rec);color:var(--rec-fg);border-color:var(--rec);font-weight:700}
+button.rec:hover{border-color:var(--rec);filter:brightness(1.08)}
+button.rec.running{background:transparent;color:var(--rec)}
 .judge{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .judge button{padding:14px 6px;font-size:14px;line-height:1.3;display:flex;flex-direction:column;align-items:center;gap:2px}
 .judge kbd{font:11px var(--mono);color:var(--muted)}
@@ -102,7 +105,7 @@ th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--sur
       <div class="now" id="nowTitle">下の「動画リスト」にYouTubeのURLを追加してください</div>
     </div>
     <div class="row">
-      <button id="btnTrain" class="primary" disabled>トレーニング開始</button>
+      <button id="btnTrain" class="rec" disabled>トレーニング開始</button>
     </div>
   </div>
 
@@ -363,7 +366,7 @@ function startTraining(){
   if(!player||!ready) return;
   S.training=true; S.phase='audible'; S.next=null; S.lastT=null;
   player.unMute(); player.playVideo();
-  $('btnTrain').textContent='トレーニング停止';
+  $('btnTrain').textContent='トレーニング停止'; $('btnTrain').classList.add('running');
   setPhase('audible','再生中');
   if(!timer) timer=setInterval(tick,30);
 }
@@ -371,11 +374,14 @@ function stopTraining(silent){
   if(inGap()) endMute(false);
   S.training=false; S.phase='idle';
   if(player&&ready) player.unMute();
-  $('btnTrain').textContent='トレーニング開始';
+  $('btnTrain').textContent='トレーニング開始'; $('btnTrain').classList.remove('running');
   if(!silent) setPhase('idle','停止中');
   if(timer){clearInterval(timer);timer=null}
 }
-$('btnTrain').addEventListener('click',function(){S.training?stopTraining():startTraining()});
+$('btnTrain').addEventListener('click',function(){
+  if(S.training){ stopTraining(); try{player.pauseVideo()}catch(e){} }
+  else startTraining();
+});
 function togglePause(){
   if(!player||!ready) return;
   var st=player.getPlayerState();
