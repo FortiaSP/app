@@ -138,6 +138,11 @@ th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--sur
         <div class="range"><input type="number" id="muteMin" min="0.5" step="0.5"> 〜 <input type="number" id="muteMax" min="0.5" step="0.5"></div>
         <div class="small" id="effMute"></div>
       </div>
+      <div>
+        <label for="fadeOut">フェードアウト／フェードイン（秒）</label>
+        <div class="range"><input type="number" id="fadeOut" min="0" max="5" step="0.1"> ／ <input type="number" id="fadeIn" min="0" max="5" step="0.1"></div>
+        <div class="small">0 にすると今までどおり瞬時に切り替わります。iPhone・iPad では音量をページから変えられないため、フェードせず瞬時に切り替わります。</div>
+      </div>
     </div>
     <label class="check"><input type="checkbox" id="hideVideo"> 無音の間は映像も隠す（演奏者の動きや再生時間で答えが分からないように）</label>
     <label class="check"><input type="checkbox" id="adaptive"> 適応モード：「一致」で無音を長く、ずれたら短くする</label>
@@ -174,12 +179,15 @@ var JLABEL={early:'脳内が先行',match:'一致',late:'脳内が遅れ',lost:'
 if(location.protocol==='file:') $('fileWarn').hidden=false;
 
 /* ---------- settings ---------- */
-var DEF={audMin:6,audMax:15,muteMin:3,muteMax:8,hideVideo:true,adaptive:false,autoNext:true,k:1};
+var DEF={audMin:6,audMax:15,muteMin:3,muteMax:8,fadeOut:0.8,fadeIn:0.3,hideVideo:true,adaptive:false,autoNext:true,k:1};
 var cfg=Object.assign({},DEF,store.get('imt.cfg',{}));
-['audMin','audMax','muteMin','muteMax'].forEach(function(id){
+['audMin','audMax','muteMin','muteMax','fadeOut','fadeIn'].forEach(function(id){
   $(id).value=cfg[id];
   $(id).addEventListener('change',function(){
-    var v=parseFloat($(id).value); if(!(v>0)) v=DEF[id];
+    var v=parseFloat($(id).value), isFade=/^fade/.test(id);
+    if(isFade){ if(!(v>=0)) v=DEF[id]; v=Math.min(5,v); }
+    else if(!(v>0)) v=DEF[id];
+    $(id).value=v;
     cfg[id]=v;
     if(cfg.audMax<cfg.audMin) cfg.audMax=cfg.audMin;
     if(cfg.muteMax<cfg.muteMin) cfg.muteMax=cfg.muteMin;
@@ -192,7 +200,7 @@ var cfg=Object.assign({},DEF,store.get('imt.cfg',{}));
   $(id).addEventListener('change',function(){
     cfg[id]=$(id).checked;
     if(id==='adaptive'&&!cfg.adaptive) cfg.k=1;
-    if(id==='hideVideo'&&S.phase==='muted') $('veil').hidden=!cfg.hideVideo;
+    if(id==='hideVideo'&&inGap()) $('veil').hidden=!cfg.hideVideo;
     saveCfg(); renderEff();
   });
 });
@@ -286,7 +294,7 @@ function onState(e){
   }
   $('btnPause').textContent=(st===YT.PlayerState.PLAYING||st===YT.PlayerState.BUFFERING)?'一時停止':'再生';
   if(st===YT.PlayerState.ENDED&&S.training){
-    if(S.phase==='muted') endMute(false);
+    if(inGap()) endMute(false);
     if(cfg.autoNext&&list.length>1){ loadVideo((cur+1)%list.length,true) }
     else stopTraining();
   }
@@ -302,7 +310,7 @@ function onErr(e){
 }
 
 /* ---------- training engine (scheduled on video time, not wall clock) ---------- */
-var S={training:false,phase:'idle',next:null,lastT:null,lastWall:0,muteStart:0,pending:null};
+var S={training:false,phase:'idle',next:null,lastT:null,lastWall:0,muteStart:0,fadeStart:0,baseVol:100,pending:null};
 var trials=store.get('imt.trials',[]);
 var timer=null;
 
@@ -318,7 +326,7 @@ function startTraining(){
   if(!timer) timer=setInterval(tick,30);
 }
 function stopTraining(silent){
-  if(S.phase==='muted') endMute(false);
+  if(inGap()) endMute(false);
   S.training=false; S.phase='idle';
   if(player&&ready) player.unMute();
   $('veil').hidden=true;
@@ -334,6 +342,12 @@ function togglePause(){
 }
 $('btnPause').addEventListener('click',togglePause);
 
+/* Phases: audible → fadeout → muted → fadein → audible.
+   Fades are driven by video time in tick(), so they stay in step with buffering and playback rate. */
+function inGap(){return S.phase==='fadeout'||S.phase==='muted'||S.phase==='fadein'}
+function ease(x){x=Math.min(1,Math.max(0,x));return 0.5-0.5*Math.cos(Math.PI*x)}
+function setGain(g){ try{player.setVolume(Math.round(S.baseVol*g))}catch(e){} }
+
 function tick(){
   if(!S.training||!player||!ready) return;
   var now=performance.now();
@@ -342,38 +356,55 @@ function tick(){
   if(S.lastT!==null){
     var expected=S.lastT+(now-S.lastWall)/1000*rate;
     if(Math.abs(t-expected)>1.2){            // user seeked: cancel the current gap and replan
-      if(S.phase==='muted') endMute(false);
+      if(inGap()) endMute(false);
       S.next=t+rnd(cfg.audMin,cfg.audMax);
     }
   }
   S.lastT=t; S.lastWall=now;
   if(S.next===null) S.next=t+rnd(cfg.audMin,cfg.audMax);
-  if(t>=S.next){
-    if(S.phase==='audible'){
+
+  if(S.phase==='audible'){
+    if(t>=S.next){
       var m=rnd(cfg.muteMin,cfg.muteMax)*kNow();
-      if(dur-t>m+1.5) beginMute(t,m); else S.next=Infinity;
-    }else endMute(true,t);
+      if(dur-t>m+cfg.fadeOut+cfg.fadeIn+1.5) beginMute(t,m); else S.next=Infinity;
+    }
+  }else if(S.phase==='fadeout'){
+    var x=cfg.fadeOut>0?(t-S.fadeStart)/cfg.fadeOut:1;
+    if(x>=1){ player.mute(); S.phase='muted'; }
+    else setGain(1-ease(x));
+  }else if(S.phase==='muted'){
+    if(t>=S.next) beginFadeIn(t);
+  }else if(S.phase==='fadein'){
+    var y=cfg.fadeIn>0?(t-S.fadeStart)/cfg.fadeIn:1;
+    if(y>=1){ setGain(1); S.phase='audible'; S.next=t+rnd(cfg.audMin,cfg.audMax); }
+    else setGain(ease(y));
   }
 }
 function beginMute(t,m){
   if(S.pending) record('none');
-  player.mute();
-  S.phase='muted'; S.muteStart=t; S.next=t+m;
+  try{var v=player.getVolume(); if(v>0) S.baseVol=v;}catch(e){}
+  S.phase='fadeout'; S.muteStart=t; S.fadeStart=t;
+  S.next=t+cfg.fadeOut+m;                    // the fully silent part lasts m seconds
+  if(cfg.fadeOut<=0){ player.mute(); S.phase='muted'; }
   if(cfg.hideVideo) $('veil').hidden=false;
   setPhase('muted','無音 — 頭の中で続けて');
   $('judge').classList.remove('on'); $('judgeHint').classList.remove('on');
   $('judgeHint').textContent='音が戻ったら判定します。';
 }
-function endMute(valid,t){
-  player.unMute();
+function beginFadeIn(t){
+  if(cfg.fadeIn>0){ setGain(0); player.unMute(); S.phase='fadein'; S.fadeStart=t; }
+  else { setGain(1); player.unMute(); S.phase='audible'; S.next=t+rnd(cfg.audMin,cfg.audMax); }
+  $('veil').hidden=true;
+  // gap length = from the start of the fade-out to the start of the fade-in
+  S.pending={at:S.muteStart,len:t-S.muteStart,vid:cur>=0?list[cur].id:'',title:cur>=0?(list[cur].title||list[cur].id):''};
+  $('judge').classList.add('on'); $('judgeHint').classList.add('on');
+  $('judgeHint').textContent='今の '+S.pending.len.toFixed(1)+' 秒の無音はどうでしたか？';
+  setPhase('audible','再生中');
+}
+function endMute(){                          // abort a gap (seek, stop, song end): restore sound at once
+  setGain(1); player.unMute();
   $('veil').hidden=true;
   S.phase=S.training?'audible':'idle';
-  if(valid){
-    S.pending={at:S.muteStart,len:t-S.muteStart,vid:cur>=0?list[cur].id:'',title:cur>=0?(list[cur].title||list[cur].id):''};
-    S.next=t+rnd(cfg.audMin,cfg.audMax);
-    $('judge').classList.add('on'); $('judgeHint').classList.add('on');
-    $('judgeHint').textContent='今の '+S.pending.len.toFixed(1)+' 秒の無音はどうでしたか？';
-  }
   if(S.training) setPhase('audible','再生中');
 }
 function record(j){
